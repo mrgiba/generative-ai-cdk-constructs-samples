@@ -16,14 +16,6 @@ import axios from "axios";
 
 const env = import.meta.env;
 
-interface QuestionnaireEntry {
-  job_id: string;
-  question_number: number;
-  approved: boolean;
-  question: string;
-  answer: string;
-}
-
 Amplify.configure({
   Auth: {
     region: env.VITE_REGION_NAME,
@@ -58,10 +50,10 @@ export async function getJobs() {
   return response.data;
 }
 
-export async function getQuestionnaire(jobId: string) {
+export async function getJobInfo(jobId: string) {
   const response = await API.get(
     env.VITE_API_GATEWAY_REST_API_NAME,
-    `questionnaires/${jobId}`,
+    `job/${jobId}`,
     {
       response: true,
     },
@@ -72,18 +64,23 @@ export async function getQuestionnaire(jobId: string) {
   return response.data;
 }
 
-export async function approveQuestionnaire(jobId: string) {
-  const response = await API.put(
-    env.VITE_API_GATEWAY_REST_API_NAME,
-    `approve/${jobId}`,
-    {
-      body: {},
-    },
-  );
-
-  console.log(response.data);
-
-  return response.data;
+export async function fetchFileFromS3(presignedUrl: string, filename: string) {
+  try {
+    // Fetch the file with responseType: 'blob'
+    const response = await axios.get(presignedUrl, {
+      responseType: 'blob'
+    });
+    
+    // Convert blob to File object
+    const file = new File([response.data], filename, {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    
+    return file;
+  } catch (error) {
+    console.error("Error fetching file:", error);
+    throw error;
+  }
 }
 
 export async function uploadDocument(file: File | Blob, filename: string) {
@@ -102,16 +99,4 @@ export async function uploadDocument(file: File | Blob, filename: string) {
   });
 
   return upload;
-}
-
-export async function editQuestionnaireEntry(entry: QuestionnaireEntry) {
-  const response = await API.put(
-    env.VITE_API_GATEWAY_REST_API_NAME,
-    `questionnaires/${entry.job_id}/${entry.question_number}`,
-    {
-      body: entry,
-    },
-  );
-
-  return response.data;
 }

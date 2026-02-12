@@ -240,15 +240,17 @@ class ApiGatewayConstruct(Construct):
     def add_s3_method(
         self,
         resource_path: str,
+        folder: str,
         http_method: str,
         request_validator: apigateway.RequestValidator,
         execution_role: any,
         bucket_name: str,
     ):
+        account_id = Stack.of(self).account
         s3_apigw_integration = apigateway.AwsIntegration(
             service="s3",
             integration_http_method=http_method,
-            path=f"{bucket_name}/{{key}}",
+            path=f"{bucket_name}/{folder}/{{key}}",
             options={
                 "credentials_role": execution_role,
                 "integration_responses": [
@@ -262,6 +264,7 @@ class ApiGatewayConstruct(Construct):
                 ],
                 "request_parameters": {
                     "integration.request.path.key": "method.request.path.key",
+                    "integration.request.header.x-amz-expected-bucket-owner": f"'{account_id}'",
                 },
             },
         )

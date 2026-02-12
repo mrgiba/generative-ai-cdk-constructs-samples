@@ -9,8 +9,8 @@ In order to deploy this project, you need to have installed:
 - [Python](https://www.python.org/downloads/) 3.12 or higher
 - [Docker](https://docs.docker.com/engine/install/)
 - Git (if using code repository)
-- [AWS CDK Toolkit](https://docs.aws.amazon.com/cdk/v2/guide/cli.html)
-- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html)
+- [AWS Cloud Development Kit (AWS CDK) Toolkit](https://docs.aws.amazon.com/cdk/v2/guide/cli.html)
+- [AWS Command Line Interface (AWS CLI)](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html)
 
 With all installed, run this command:
 
@@ -27,7 +27,7 @@ Docker Desktop
 ```
 
 If any of these commands fails, you can revisit the documentation and check for possible steps you have forgotten to complete.
-Ensure that your CDK version is using CDK V2, by checking if the second line of the output follows the pattern 2._._.
+Verify that your CDK version is using CDK V2, by checking if the second line of the output follows the pattern 2._._.
 
 With these installed, it is time to configure your environment to connect to your AWS Account. We **highly recommend
 using an isolated AWS Account** to test this project. If you do not have such account, reach out to your Account Manager,
@@ -77,7 +77,7 @@ The backend stack is divided into `Ingestion` and `Inference` substacks. You can
 
 To deploy the `Ingestion` stack directly into your AWS account:
 
-1. Run AWS CDK Toolkit to deploy the `RFPAnswers-IngestionStack` with the runtime resources.
+1. Run AWS Cloud Development Kit (AWS CDK) Toolkit to deploy the `RFPAnswers-IngestionStack` with the runtime resources.
    ```shell
    $ cdk deploy RFPAnswers-IngestionStack --require-approval=never --verbose
    ```
@@ -88,7 +88,7 @@ To deploy the `Ingestion` stack directly into your AWS account:
 
 To deploy the `Inference` stack directly into your AWS account:
 
-1. Run AWS CDK Toolkit to deploy the `RFPAnswers-InferenceStack` with the runtime resources.
+1. Run AWS Cloud Development Kit (AWS CDK) Toolkit to deploy the `RFPAnswers-InferenceStack` with the runtime resources.
    ```shell
    $ cdk deploy RFPAnswers-InferenceStack --require-approval=never --verbose
    ```
@@ -97,11 +97,45 @@ To deploy the `Inference` stack directly into your AWS account:
    $ cdk deploy RFPAnswers-InferenceStack --require-approval=never --verbose
    ```
 
+### Knowledge Base Setup
+
+After deploying the stacks, populate the Knowledge Base with documents:
+
+1. Navigate to the knowledge base setup directory:
+   ```shell
+   $ cd knowledge_base_setup
+   ```
+
+2. Update `documents.csv` with the file paths, merchant information, and last modified dates for your documents. Each row should contain:
+   - `filepath`: Absolute or relative path to the document file
+   - `merchant`: Merchant or organization name associated with the document
+   - `lastModified`: Last modification date in YYYY-MM-DD format
+
+   Example:
+   ```csv
+   filepath,merchant,lastModified
+   /path/to/product-catalog.pdf,ACME Corp,2025-12-15
+   ../docs/terms-and-conditions.pdf,ACME Corp,2026-01-10
+   faq-shipping.pdf,Global Logistics,2025-11-20
+   ```
+
+3. Upload supporting documents to the SupportingDocumentsBucket:
+   ```shell
+   $ python upload_to_kb.py <SupportingDocumentsBucket-name>
+   ```
+
+4. Upload FAQ documents to the FAQBucket:
+   ```shell
+   $ python upload_to_kb.py <FAQBucket-name>
+   ```
+
+The bucket names can be found in the AWS CloudFormation stack outputs after deployment.
+
 ## Clean up
 
 Do not forget to delete the stack to avoid unexpected charges.
 
-First make sure to remove all data from the Amazon Simple Storage Service (Amazon S3) Buckets.
+First make sure to remove all data from the Amazon Simple Storage Service (Amazon S3) buckets.
 
 ```shell
     $ cdk destroy RFPAnswers-IngestionStack
@@ -111,4 +145,4 @@ First make sure to remove all data from the Amazon Simple Storage Service (Amazo
     $ cdk destroy RFPAnswers-InferenceStack
 ```
 
-Delete all the associated logs created by the different services in Amazon CloudWatch logs. 
+Delete all the associated logs created by the different services in Amazon CloudWatch Logs.

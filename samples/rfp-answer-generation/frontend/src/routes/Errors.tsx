@@ -37,7 +37,7 @@ export default function Errors() {
         <i>{errorMessage(error)}</i>
       </code>
 
-      <footer>Built with ❤️ by PACE</footer>
+
     </main>
   );
 }

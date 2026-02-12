@@ -8,7 +8,7 @@ You can clone this repository and rename the project directory according to your
 In order to deploy this project, you need to have installed:
 
 - NodeJS and NPM
-- AWS CLI
+- AWS Command Line Interface (AWS CLI)
 - Git (if using code repository)
 
 You need to have AWS CLI properly configured with the credentials for your AWS account.
@@ -18,7 +18,7 @@ Make sure to deploy the frontend using the same configuration option as your bac
 
 ### Local development connected to the backend
 
-1. Run AWS CLI command line tool to get the outputs from the `RFPAnswers-InferenceStack`:
+1. Run AWS Command Line Interface (AWS CLI) command line tool to get the outputs from the `RFPAnswers-InferenceStack`:
 
    ```shell
    $ aws cloudformation describe-stacks --stack-name RFPAnswers-InferenceStack --query "Stacks[0].Outputs"

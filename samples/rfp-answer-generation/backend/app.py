@@ -32,8 +32,8 @@ ingestion_stack = IngestionStack(
 inference_stack = InferenceStack(
     app,
     "RFPAnswers-InferenceStack",
-    faq_knowledge_base_id=ingestion_stack.faq_knowledge_base.knowledge_base_id,
-    docs_knowledge_base_id=ingestion_stack.supporting_doc_knowledge_base.knowledge_base_id,
+    faq_knowledge_base_id=ingestion_stack.faq_knowledge_base_cfn.attr_knowledge_base_id,
+    docs_knowledge_base_id=ingestion_stack.supporting_doc_knowledge_base_cfn.attr_knowledge_base_id,
 )
 
 cdk.Aspects.of(app).add(AwsSolutionsChecks())

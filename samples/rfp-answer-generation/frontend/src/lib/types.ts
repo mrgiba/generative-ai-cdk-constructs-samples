@@ -13,8 +13,9 @@
 
 export interface Job {
   job_id: string;
-  filename: string;
-  start_date?: string;
+  updated_at: string;
+  status: string;
+  input_s3_uri: string;
 }
 
 export interface Questionnaire {

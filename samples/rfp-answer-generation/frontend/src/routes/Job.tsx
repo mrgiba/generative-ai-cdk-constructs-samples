@@ -11,176 +11,216 @@
 // and limitations under the License.
 //
 
-import { useLoaderData, Await } from "react-router-dom";
-import { Suspense, useState } from "react";
+import { useParams, Link } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
+import { IconAlertTriangle } from "@tabler/icons-react";
+import { Info, Hash, CheckCircle2, Calendar, Clock, Copy, Check } from "lucide-react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
+import { SpreadsheetViewer } from "@/components/spreadsheet";
+import { Spinner } from "@/components/ui/spinner";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Badge } from "@/components/ui/badge";
+import { getJobInfo } from "@/lib/api";
 
-import { IconAlertTriangle, IconRobot } from "@tabler/icons-react";
-import { Questionnaire } from "@/lib/types";
-import Approved from "@/components/jobs/approved";
-import Question, { QuestionsSkeleton } from "@/components/jobs/question";
-import { generateXLSX } from "@/lib/excel";
-import { approveQuestionnaire } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/use-toast";
-
-interface QuestionnaireDataType {
-  questionnaire: Record<string, Questionnaire[]>;
-  filename: string;
+interface JobData {
   job_id: string;
-  start_date: string;
+  status: string;
+  filename: string;
+  presigned_url: string;
+  created_at: string;
+  updated_at: string;
 }
 
-interface QuestionnaireLoaderType {
-  data: QuestionnaireDataType;
-}
+function JobInfoButton({ jobData, loading }: { jobData: JobData | null; loading: boolean }) {
+  const [jobIdCopied, setJobIdCopied] = useState(false);
 
-interface ApprovedCounts {
-  approved: number;
-  notApproved: number;
-}
+  const handleCopyJobId = useCallback(async () => {
+    if (!jobData?.job_id) return;
+    try {
+      await navigator.clipboard.writeText(jobData.job_id);
+      setJobIdCopied(true);
+      setTimeout(() => setJobIdCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy job ID:', err);
+    }
+  }, [jobData?.job_id]);
 
-function countApproved(arr: Questionnaire[]): ApprovedCounts {
-  const approved = arr.reduce((r, n) => (n.approved ? r + 1 : r), 0);
-  const notApproved = arr.length - approved;
-
-  return {
-    approved,
-    notApproved,
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString();
   };
-}
 
-export default function Jobs() {
-  const loaderData = useLoaderData() as QuestionnaireLoaderType;
-  const { toast } = useToast();
+  if (loading) {
+    return (
+      <div className="inline-flex items-center justify-center h-8 w-8">
+        <Spinner className="size-4" />
+      </div>
+    );
+  }
+
+  if (!jobData) return null;
 
   return (
-    <div className="grid grid-cols-12 gap-6">
-      <div className="col-span-12">
-        <Suspense
-          fallback={
-            <div className="flex flex-col gap-2">
-              <QuestionsSkeleton />
-            </div>
-          }
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          className="inline-flex items-center justify-center rounded-md text-sm font-medium h-8 w-8 border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
+          aria-label="Job information"
         >
-          <Await
-            resolve={loaderData.data}
-            errorElement={
-              <div className="flex flex-col gap-2">
-                <IconAlertTriangle className="h-6 w-6" /> Error
-              </div>
-            }
-          >
-            {(loadedData: QuestionnaireDataType) => {
-              const [questionnaireByTopic, setQuestionnaireByTopic] = useState<
-                Record<string, Questionnaire[]>
-              >(loadedData.questionnaire);
+          <Info className="h-4 w-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80 p-0">
+        <div className="px-4 py-3 border-b">
+          <h4 className="font-semibold leading-none">Job Details</h4>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="flex items-center gap-3 h-8">
+            <div className="rounded-md bg-muted p-1.5">
+              <Hash className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium w-24">Job ID</p>
+            <div className="flex-1 flex justify-end items-center gap-1">
+              <code className="text-xs text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">
+                {jobData.job_id.length > 16
+                  ? `${jobData.job_id.slice(0, 6)}...${jobData.job_id.slice(-6)}`
+                  : jobData.job_id}
+              </code>
+              <button
+                onClick={handleCopyJobId}
+                className="p-1 rounded hover:bg-muted transition-colors"
+                aria-label="Copy job ID"
+              >
+                {jobIdCopied ? (
+                  <Check className="h-3.5 w-3.5 text-green-600" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 h-8">
+            <div className="rounded-md bg-muted p-1.5">
+              <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium w-24">Status</p>
+            <div className="flex-1 flex justify-end">
+              <Badge
+                variant={jobData.status === 'SUCCEEDED' ? 'default' : 'secondary'}
+                className={jobData.status === 'SUCCEEDED' ? 'bg-green-600 hover:bg-green-600' : ''}
+              >
+                {jobData.status}
+              </Badge>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 h-8">
+            <div className="rounded-md bg-muted p-1.5">
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium w-24">Created</p>
+            <p className="text-xs text-muted-foreground flex-1 text-right">{formatDate(jobData.created_at)}</p>
+          </div>
+          <div className="flex items-center gap-3 h-8">
+            <div className="rounded-md bg-muted p-1.5">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium w-24">Updated</p>
+            <p className="text-xs text-muted-foreground flex-1 text-right">{formatDate(jobData.updated_at)}</p>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
-              const editQuestionnaire = (questionnaire: Questionnaire) => {
-                const { topic, question_number } = questionnaire;
+export default function Job() {
+  const { jobId } = useParams<{ jobId: string }>();
+  const [jobData, setJobData] = useState<JobData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-                let topicQuestions = [...questionnaireByTopic[topic]];
-                const oldQuestionIndex = topicQuestions.findIndex(
-                  (item: Questionnaire) =>
-                    item.question_number === question_number,
-                );
+  useEffect(() => {
+    async function fetchJobData() {
+      if (!jobId) return;
 
-                topicQuestions[oldQuestionIndex] = questionnaire;
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await getJobInfo(jobId);
+        setJobData(data);
+      } catch (err) {
+        console.error("Failed to fetch job data:", err);
+        setError("Failed to load job data");
+      } finally {
+        setLoading(false);
+      }
+    }
 
-                setQuestionnaireByTopic({
-                  ...questionnaireByTopic,
-                  [topic]: [...topicQuestions],
-                });
-              };
+    fetchJobData();
+  }, [jobId]);
 
-              return (
-                <div className="mb-6 flex flex-col gap-6">
-                  <div className="flex flex-col gap-4 p-6">
-                    <h1 className="text-3xl font-extrabold">{`${loadedData.filename}`}</h1>
-                    <div className="flex items-center justify-between ">
-                      <span className="align-middle text-lg font-normal">{`Job ID: ${loadedData.job_id}`}</span>
-                      <div className="flex gap-4">
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            approveQuestionnaire(loadedData.job_id);
-                            toast({
-                              title: "All answers have been approved.",
-                              description: "Please refresh the page.",
-                            });
-                          }}
-                          aria-label="Approve All"
-                        >
-                          Approve All
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            generateXLSX(
-                              loadedData.filename,
-                              loadedData.job_id,
-                              questionnaireByTopic,
-                            );
-                          }}
-                          aria-label="Generate XLSX"
-                        >
-                          Generate XLSX
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                  {Object.keys(questionnaireByTopic).map((topic) => (
-                    <Card key={topic}>
-                      <CardHeader>
-                        <CardTitle className="flex justify-between">
-                          <span className="w-full">{topic}</span>
-                          <div className="flex w-full justify-end">
-                            <Approved
-                              {...countApproved(questionnaireByTopic[topic])}
-                            />
-                          </div>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="flex w-full flex-col gap-2">
-                        <Collapsible id={`${topic}-questions`}>
-                          <CollapsibleTrigger className="flex items-center gap-2 rounded-full bg-slate-700 px-2 py-1 pr-3 text-xs font-bold text-white hover:bg-slate-500">
-                            <IconRobot className="w-4" />
-                            Show/hide questions for topic
-                          </CollapsibleTrigger>
-                          <CollapsibleContent className="mt-3 rounded-md border p-3">
-                            <ul className="flex flex-col gap-8">
-                              {questionnaireByTopic[topic].map(
-                                (question, index, arr) => (
-                                  <>
-                                    <Question
-                                      id={`${question.job_id}#${question.question_number}`}
-                                      questionnaire={question}
-                                      editQuestionnaire={editQuestionnaire}
-                                    />
-                                    {index != arr.length - 1 ? <hr /> : null}
-                                  </>
-                                ),
-                              )}
-                            </ul>
-                          </CollapsibleContent>
-                        </Collapsible>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              );
-            }}
-          </Await>
-        </Suspense>
+  return (
+    <div className="h-full flex flex-col">
+      {/* Header - always visible with jobId from URL */}
+      <div className="px-4 py-2 border-b bg-background flex items-center justify-between">
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link to="/">Jobs</Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{jobId}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+
+        <JobInfoButton jobData={jobData} loading={loading} />
       </div>
+
+      {/* Error state */}
+      {error && (
+        <div className="flex-1 flex flex-col items-center justify-center">
+          <div className="flex flex-col items-center gap-4 p-8 animate-fade-in">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
+              <IconAlertTriangle className="h-8 w-8 text-destructive" />
+            </div>
+            <div className="flex flex-col items-center gap-1 text-center">
+              <span className="text-lg font-semibold text-foreground">Failed to load job</span>
+              <span className="text-sm text-muted-foreground max-w-sm">{error}</span>
+            </div>
+            <Link
+              to="/"
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors mt-2"
+            >
+              Back to Jobs
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Spreadsheet viewer - always rendered, handles its own loading states */}
+      {!error && (
+        <div className="flex-1 overflow-hidden">
+          <SpreadsheetViewer
+            url={jobData?.presigned_url}
+            filename={jobData?.filename}
+          />
+        </div>
+      )}
     </div>
   );
 }

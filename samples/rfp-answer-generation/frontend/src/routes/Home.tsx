@@ -98,7 +98,7 @@ export default function Home() {
 
       <Suspense fallback={<DataTableSkeleton />}>
         <Await resolve={loaderData.jobs} errorElement={<p>Error</p>}>
-          {(loadedData) => <JobsTable columns={columns} data={loadedData} />}
+          {(loadedData) => <JobsTable columns={columns} data={loadedData.items} />}
         </Await>
       </Suspense>
     </div>
