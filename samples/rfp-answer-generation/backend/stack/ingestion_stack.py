@@ -17,12 +17,14 @@ import shutil
 from aws_cdk import (
     aws_iam as iam,
     aws_lambda as lambda_,
+    aws_bedrock as bedrock_cfn,
     CfnOutput,
     Duration,
     Stack,
 )
 from constructs import Construct
 from cdk_nag import NagSuppressions, NagPackSuppression
+from cdklabs.generative_ai_cdk_constructs import s3vectors
 
 from .constants.prompts import SUPPORTING_DOCUMENT_PARSING_PROMPT
 from .stack_constructs import (
@@ -30,16 +32,6 @@ from .stack_constructs import (
     PythonFunctionConstruct,
     ServerAccessLogsBucketConstruct,
 )
-
-from cdklabs.generative_ai_cdk_constructs import (
-    bedrock,
-    opensearchserverless as aoss,
-    opensearch_vectorindex as os_vectorstore,
-)
-
-base_path = os.path.join(os.path.dirname(__file__), "lambdas")
-shared_directory = os.path.join(os.path.dirname(__file__), "lambdas", "shared")
-
 
 class IngestionStack(Stack):
     def __init__(
@@ -50,7 +42,48 @@ class IngestionStack(Stack):
     ):
         super().__init__(scope, id, **kwargs)
 
-        self.vector_db = aoss.VectorCollection(self, "VectorStore")
+        # Create S3 Vector Buckets and Indexes for both FAQ and Supporting Docs
+        self.faq_vector_bucket = s3vectors.VectorBucket(
+            self, "FAQVectorBucket"
+        )
+
+        self.faq_vector_index = s3vectors.VectorIndex(
+            self,
+            "FAQVectorIndex",
+            vector_bucket=self.faq_vector_bucket,
+            dimension=1024,
+            distance_metric=s3vectors.VectorIndexDistanceMetric.COSINE,
+            data_type=s3vectors.VectorIndexDataType.FLOAT_32,
+            non_filterable_metadata_keys=[
+                "AMAZON_BEDROCK_METADATA",
+                "AMAZON_BEDROCK_TEXT",
+                "x-amz-bedrock-kb-data-source-id",
+                "x-amz-bedrock-kb-source-file-modality",
+                "question",
+                "answer",
+            ]
+            # merchant and lastModified are filterable by default (not in non_filterable list)
+        )
+
+        self.doc_vector_bucket = s3vectors.VectorBucket(
+            self, "DocVectorBucket"
+        )
+
+        self.doc_vector_index = s3vectors.VectorIndex(
+            self,
+            "DocVectorIndex",
+            vector_bucket=self.doc_vector_bucket,
+            dimension=1024,
+            distance_metric=s3vectors.VectorIndexDistanceMetric.COSINE,
+            data_type=s3vectors.VectorIndexDataType.FLOAT_32,
+            non_filterable_metadata_keys=[
+                "AMAZON_BEDROCK_METADATA",
+                "AMAZON_BEDROCK_TEXT",
+                "x-amz-bedrock-kb-data-source-id",
+                "x-amz-bedrock-kb-source-file-modality",
+            ]
+            # merchant and lastModified are filterable by default (not in non_filterable list)
+        )
 
         self.logging_bucket = ServerAccessLogsBucketConstruct(
             self,
@@ -87,53 +120,62 @@ class IngestionStack(Stack):
             value=self.supporting_doc_bucket.bucket_name,
         )
 
-        for file in os.listdir(shared_directory):
-            shutil.copyfile(
-                f"{shared_directory}/{file}",
-                f"{base_path}/custom_chunking_handler_fn/app/{file}",
-            )
-
         ##############################################
         # FAQs
         ##############################################
 
-        self.faq_index = os_vectorstore.VectorIndex(
+        # Create Knowledge Base role with S3 Vectors permissions
+        self.faq_kb_role = iam.Role(
             self,
-            "FAQIndex",
-            collection=self.vector_db,
-            index_name=f"faq_index",
-            vector_field="vector",
-            vector_dimensions=1024,
-            mappings=[
-                os_vectorstore.MetadataManagementFieldProps(
-                    mapping_field="answer", data_type="text", filterable=False
-                ),
-                os_vectorstore.MetadataManagementFieldProps(
-                    mapping_field="question", data_type="text", filterable=False
-                ),
-                os_vectorstore.MetadataManagementFieldProps(
-                    mapping_field="topic", data_type="keyword", filterable=True
-                ),
-                os_vectorstore.MetadataManagementFieldProps(
-                    mapping_field="source", data_type="keyword", filterable=True
-                ),
-                os_vectorstore.MetadataManagementFieldProps(
-                    mapping_field="date", data_type="date", filterable=False
-                ),
-            ],
+            "FAQKnowledgeBaseRole",
+            assumed_by=iam.ServicePrincipal("bedrock.amazonaws.com"),
         )
 
-        self.faq_index.node.add_dependency(self.vector_db)
+        self.faq_kb_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "s3vectors:PutVectors",
+                    "s3vectors:GetVectors",
+                    "s3vectors:DeleteVectors",
+                    "s3vectors:QueryVectors",
+                    "s3vectors:GetIndex",
+                ],
+                resources=[self.faq_vector_index.vector_index_arn],
+            )
+        )
 
-        self.faq_knowledge_base = bedrock.KnowledgeBase(
+        self.faq_kb_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModel"],
+                resources=[
+                    f"arn:aws:bedrock:{Stack.of(self).region}::foundation-model/amazon.titan-embed-text-v2:0"
+                ],
+            )
+        )
+
+        self.faq_bucket.grant_read(self.faq_kb_role)
+
+        # Create Knowledge Base using CfnKnowledgeBase for S3 Vectors support
+        self.faq_knowledge_base_cfn = bedrock_cfn.CfnKnowledgeBase(
             self,
             "FAQKnowledgeBase",
-            embeddings_model=bedrock.BedrockFoundationModel.TITAN_EMBED_TEXT_V2_1024,
-            index_name=self.faq_index.index_name,
-            vector_store=self.vector_db,
-            vector_index=self.faq_index,
-            vector_field=self.faq_index.vector_field,
+            name=f"{Stack.of(self).stack_name}-faq-kb",
+            role_arn=self.faq_kb_role.role_arn,
+            knowledge_base_configuration=bedrock_cfn.CfnKnowledgeBase.KnowledgeBaseConfigurationProperty(
+                type="VECTOR",
+                vector_knowledge_base_configuration=bedrock_cfn.CfnKnowledgeBase.VectorKnowledgeBaseConfigurationProperty(
+                    embedding_model_arn=f"arn:aws:bedrock:{Stack.of(self).region}::foundation-model/amazon.titan-embed-text-v2:0"
+                ),
+            ),
+            storage_configuration=bedrock_cfn.CfnKnowledgeBase.StorageConfigurationProperty(
+                type="S3_VECTORS",
+                s3_vectors_configuration=bedrock_cfn.CfnKnowledgeBase.S3VectorsConfigurationProperty(
+                    vector_bucket_arn=self.faq_vector_bucket.vector_bucket_arn,
+                    index_arn=self.faq_vector_index.vector_index_arn,
+                ),
+            ),
         )
+        self.faq_knowledge_base_cfn.node.add_dependency(self.faq_kb_role)
 
         self.faq_custom_transformation_function = PythonFunctionConstruct(
             self,
@@ -143,7 +185,7 @@ class IngestionStack(Stack):
             ),
             index="app/handler.py",
             handler="handler",
-            runtime=lambda_.Runtime.PYTHON_3_13,
+            runtime=lambda_.Runtime.PYTHON_3_14,
             memory_size=1024,
             architecture=lambda_.Architecture.X86_64,
             timeout=Duration.minutes(15),
@@ -158,7 +200,11 @@ class IngestionStack(Stack):
                     "bedrock:InvokeModel",
                 ],
                 resources=[
-                    "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0",
+                    f"arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+                    f"arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0",
+                    f"arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0",
+                    f"arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
+                    f"arn:aws:bedrock:{Stack.of(self).region}:{Stack.of(self).account}:inference-profile/*"
                 ],
             )
         )
@@ -169,21 +215,41 @@ class IngestionStack(Stack):
             self.faq_custom_transformation_function.role
         )
 
-        self.faq_custom_transformation_bucket.grant_read_write(
-            self.faq_knowledge_base.role
-        )
+        self.faq_custom_transformation_bucket.grant_read_write(self.faq_kb_role)
+        self.faq_custom_transformation_function.grant_invoke(self.faq_kb_role)
 
-        self.faq_data_source = bedrock.S3DataSource(
+        self.faq_data_source = bedrock_cfn.CfnDataSource(
             self,
             "FAQDataSource",
-            bucket=self.faq_bucket,
-            # inclusion_prefixes=[".csv", ".xlsx"],
-            knowledge_base=self.faq_knowledge_base,
-            data_source_name="faq_data_source",
-            chunking_strategy=bedrock.ChunkingStrategy.NONE,
-            custom_transformation=bedrock.CustomTransformation.lambda_(
-                lambda_function=self.faq_custom_transformation_function,
-                s3_bucket_uri=f"s3://{self.faq_custom_transformation_bucket.bucket_name}/",
+            name="faq_data_source",
+            knowledge_base_id=self.faq_knowledge_base_cfn.attr_knowledge_base_id,
+            data_source_configuration=bedrock_cfn.CfnDataSource.DataSourceConfigurationProperty(
+                type="S3",
+                s3_configuration=bedrock_cfn.CfnDataSource.S3DataSourceConfigurationProperty(
+                    bucket_arn=self.faq_bucket.bucket_arn
+                ),
+            ),
+            vector_ingestion_configuration=bedrock_cfn.CfnDataSource.VectorIngestionConfigurationProperty(
+                chunking_configuration=bedrock_cfn.CfnDataSource.ChunkingConfigurationProperty(
+                    chunking_strategy="NONE"
+                ),
+                custom_transformation_configuration=bedrock_cfn.CfnDataSource.CustomTransformationConfigurationProperty(
+                    intermediate_storage=bedrock_cfn.CfnDataSource.IntermediateStorageProperty(
+                        s3_location=bedrock_cfn.CfnDataSource.S3LocationProperty(
+                            uri=f"s3://{self.faq_custom_transformation_bucket.bucket_name}/"
+                        )
+                    ),
+                    transformations=[
+                        bedrock_cfn.CfnDataSource.TransformationProperty(
+                            step_to_apply="POST_CHUNKING",
+                            transformation_function=bedrock_cfn.CfnDataSource.TransformationFunctionProperty(
+                                transformation_lambda_configuration=bedrock_cfn.CfnDataSource.TransformationLambdaConfigurationProperty(
+                                    lambda_arn=self.faq_custom_transformation_function.function_arn
+                                )
+                            ),
+                        )
+                    ],
+                ),
             ),
         )
 
@@ -191,59 +257,93 @@ class IngestionStack(Stack):
         # Supporting Documents
         ##############################################
 
-        self.doc_index = os_vectorstore.VectorIndex(
+        # Create Knowledge Base role with S3 Vectors permissions
+        self.doc_kb_role = iam.Role(
             self,
-            "SupportingDocumentsIndex",
-            collection=self.vector_db,
-            index_name=f"doc_index",
-            vector_field="vector",
-            vector_dimensions=1024,
-            mappings=[
-                os_vectorstore.MetadataManagementFieldProps(
-                    mapping_field="chunk", data_type="text", filterable=False
-                ),
-                os_vectorstore.MetadataManagementFieldProps(
-                    mapping_field="chunk_type", data_type="keyword", filterable=True
-                ),
-                os_vectorstore.MetadataManagementFieldProps(
-                    mapping_field="source", data_type="keyword", filterable=True
-                ),
-                os_vectorstore.MetadataManagementFieldProps(
-                    mapping_field="date", data_type="date", filterable=False
-                ),
-            ],
+            "DocKnowledgeBaseRole",
+            assumed_by=iam.ServicePrincipal("bedrock.amazonaws.com"),
         )
 
-        self.doc_index.node.add_dependency(self.vector_db)
+        self.doc_kb_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "s3vectors:PutVectors",
+                    "s3vectors:GetVectors",
+                    "s3vectors:DeleteVectors",
+                    "s3vectors:QueryVectors",
+                    "s3vectors:GetIndex",
+                ],
+                resources=[self.doc_vector_index.vector_index_arn],
+            )
+        )
 
-        self.supporting_doc_knowledge_base = bedrock.KnowledgeBase(
+        self.doc_kb_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModel", "bedrock:GetInferenceProfile"],
+                resources=[
+                    f"arn:aws:bedrock:{Stack.of(self).region}:{Stack.of(self).account}:inference-profile/*",
+                    f"arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
+                    f"arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0",
+                ],
+            )
+        )
+
+        self.supporting_doc_bucket.grant_read(self.doc_kb_role)
+
+        # Create Knowledge Base using CfnKnowledgeBase for S3 Vectors support
+        self.supporting_doc_knowledge_base_cfn = bedrock_cfn.CfnKnowledgeBase(
             self,
             "SupportingDocumentsKnowledgeBase",
-            embeddings_model=bedrock.BedrockFoundationModel.TITAN_EMBED_TEXT_V2_1024,
-            vector_store=self.vector_db,
-            vector_index=self.doc_index,
-            index_name=self.doc_index.index_name,
-            vector_field=self.doc_index.vector_field,
+            name=f"{Stack.of(self).stack_name}-doc-kb",
+            role_arn=self.doc_kb_role.role_arn,
+            knowledge_base_configuration=bedrock_cfn.CfnKnowledgeBase.KnowledgeBaseConfigurationProperty(
+                type="VECTOR",
+                vector_knowledge_base_configuration=bedrock_cfn.CfnKnowledgeBase.VectorKnowledgeBaseConfigurationProperty(
+                    embedding_model_arn=f"arn:aws:bedrock:{Stack.of(self).region}::foundation-model/amazon.titan-embed-text-v2:0"
+                ),
+            ),
+            storage_configuration=bedrock_cfn.CfnKnowledgeBase.StorageConfigurationProperty(
+                type="S3_VECTORS",
+                s3_vectors_configuration=bedrock_cfn.CfnKnowledgeBase.S3VectorsConfigurationProperty(
+                    vector_bucket_arn=self.doc_vector_bucket.vector_bucket_arn,
+                    index_arn=self.doc_vector_index.vector_index_arn,
+                ),
+            ),
         )
+        self.supporting_doc_knowledge_base_cfn.node.add_dependency(self.doc_kb_role)
 
-        self.supporting_doc_data_source = bedrock.S3DataSource(
+        self.supporting_doc_data_source = bedrock_cfn.CfnDataSource(
             self,
             "SupportingDocumentsDataSource",
-            bucket=self.supporting_doc_bucket,
-            inclusion_prefixes=[".pdf"],
-            knowledge_base=self.supporting_doc_knowledge_base,
-            data_source_name="supporting_docs_data_source",
-            chunking_strategy=bedrock.ChunkingStrategy.FIXED_SIZE,
-            parsing_strategy=bedrock.ParsingStategy.foundation_model(
-                parsing_model=bedrock.BedrockFoundationModel.ANTHROPIC_CLAUDE_3_5_SONNET_V1_0.as_i_model(
-                    self
+            name="supporting_docs_data_source",
+            knowledge_base_id=self.supporting_doc_knowledge_base_cfn.attr_knowledge_base_id,
+            data_source_configuration=bedrock_cfn.CfnDataSource.DataSourceConfigurationProperty(
+                type="S3",
+                s3_configuration=bedrock_cfn.CfnDataSource.S3DataSourceConfigurationProperty(
+                    bucket_arn=self.supporting_doc_bucket.bucket_arn
                 ),
-                parsing_prompt=SUPPORTING_DOCUMENT_PARSING_PROMPT,
+            ),
+            vector_ingestion_configuration=bedrock_cfn.CfnDataSource.VectorIngestionConfigurationProperty(
+                chunking_configuration=bedrock_cfn.CfnDataSource.ChunkingConfigurationProperty(
+                    chunking_strategy="FIXED_SIZE",
+                    fixed_size_chunking_configuration=bedrock_cfn.CfnDataSource.FixedSizeChunkingConfigurationProperty(
+                        max_tokens=300,
+                        overlap_percentage=20,
+                    ),
+                ),
+                parsing_configuration=bedrock_cfn.CfnDataSource.ParsingConfigurationProperty(
+                    parsing_strategy="BEDROCK_FOUNDATION_MODEL",
+                    bedrock_foundation_model_configuration=bedrock_cfn.CfnDataSource.BedrockFoundationModelConfigurationProperty(
+                        model_arn=f"arn:aws:bedrock:{Stack.of(self).region}:{Stack.of(self).account}:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0",
+                        parsing_prompt=bedrock_cfn.CfnDataSource.ParsingPromptProperty(
+                            parsing_prompt_text=SUPPORTING_DOCUMENT_PARSING_PROMPT
+                        ),
+                    ),
+                ),
             ),
         )
 
         self.template_options.description='Description: (uksb-1tupboc43) (tag:rfp-answer-generation)'
-
 
         NagSuppressions.add_resource_suppressions(
             construct=self.faq_custom_transformation_function.role,
@@ -251,34 +351,73 @@ class IngestionStack(Stack):
                 NagPackSuppression(
                     id="AwsSolutions-IAM5",
                     reason="Custom transformation needs to support non-standardized object naming.",
-                ),
-            ],
-            apply_to_children=True,
-        )
-
-        NagSuppressions.add_resource_suppressions_by_path(
-            stack=Stack.of(self),
-            path=f"/{Stack.of(self).stack_name}/OpenSearchIndexCRProvider/CustomResourcesFunction",
-            suppressions=[
-                NagPackSuppression(
-                    id="AwsSolutions-L1",
-                    reason="OpenSearch Custom Resource is managed by Generative AI CDK Constructs library.",
-                ),
-            ],
-            apply_to_children=True,
-        )
-
-        NagSuppressions.add_resource_suppressions_by_path(
-            stack=Stack.of(self),
-            path=f"/{Stack.of(self).stack_name}/LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8a/ServiceRole",
-            suppressions=[
-                NagPackSuppression(
-                    id="AwsSolutions-IAM4",
-                    reason="CDK CustomResource LogRetention Lambda uses the AWSLambdaBasicExecutionRole AWS Managed Policy. Managed by CDK.",
+                    applies_to=[
+                        "Resource::<FAQBucketBF1EE662.Arn>/*",
+                        "Resource::<FAQCustomTransformationBucket3331BD34.Arn>/*",
+                        "Action::s3:GetBucket*",
+                        "Action::s3:GetObject*",
+                        "Action::s3:List*",
+                        "Action::s3:Abort*",
+                        "Action::s3:DeleteObject*",
+                    ]
                 ),
                 NagPackSuppression(
                     id="AwsSolutions-IAM5",
-                    reason="CDK CustomResource LogRetention Lambda uses the AWSLambdaBasicExecutionRole AWS Managed Policy. Managed by CDK.",
+                    reason="Star permissions required for Cross-Region Inference.",
+                    applies_to=[
+                        "Resource::arn:aws:bedrock:<AWS::Region>:<AWS::AccountId>:inference-profile/*",
+                        "Resource::arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "Resource::arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "Resource::arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0",
+                        "Resource::arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
+                    ]
+                ),
+            ],
+            apply_to_children=True,
+        )
+
+        NagSuppressions.add_resource_suppressions(
+            construct=self.faq_kb_role,
+            suppressions=[
+                NagPackSuppression(
+                    id="AwsSolutions-IAM5",
+                    reason="Knowledge Base requires wildcard permissions to read S3 objects with dynamic names.",
+                    applies_to=[
+                        "Resource::<FAQBucketBF1EE662.Arn>/*",
+                        "Resource::<FAQCustomTransformationBucket3331BD34.Arn>/*",
+                        "Resource::<FAQCustomTransformationFnE1201716.Arn>:*",
+                        "Action::s3:GetBucket*",
+                        "Action::s3:GetObject*",
+                        "Action::s3:List*",
+                        "Action::s3:Abort*",
+                        "Action::s3:DeleteObject*",
+                    ]
+                ),
+            ],
+            apply_to_children=True,
+        )
+
+        NagSuppressions.add_resource_suppressions(
+            construct=self.doc_kb_role,
+            suppressions=[
+                NagPackSuppression(
+                    id="AwsSolutions-IAM5",
+                    reason="Knowledge Base requires wildcard permissions to read S3 objects with dynamic names.",
+                    applies_to=[
+                        "Resource::<SupportingDocumentsBucketB0C65E11.Arn>/*",
+                        "Action::s3:GetBucket*",
+                        "Action::s3:GetObject*",
+                        "Action::s3:List*",
+                    ]
+                ),
+                NagPackSuppression(
+                    id="AwsSolutions-IAM5",
+                    reason="Star permissions required for Cross-Region Inference.",
+                    applies_to=[
+                        "Resource::arn:aws:bedrock:<AWS::Region>:<AWS::AccountId>:inference-profile/*",
+                        "Resource::arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
+                        "Resource::arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0",
+                    ]
                 ),
             ],
             apply_to_children=True,

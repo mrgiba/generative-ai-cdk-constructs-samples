@@ -23,25 +23,21 @@ import {
   defer,
 } from "react-router-dom";
 
-import { getQuestionnaire, getJobs } from "@/lib/api";
+import { getJobs } from "@/lib/api";
 import "./index.css";
 
 import Error from "@/routes/Errors";
 import Home from "@/routes/Home";
-import Jobs from "@/routes/Job";
 import Root from "@/routes/Root";
+import FullWidthRoot from "@/routes/FullWidthRoot";
 import { RequireAuth } from "./components/RequireAuth";
 import { Login } from "./routes/Login";
 import { Toaster } from "./components/ui/toaster";
+import Job from "./routes/Job";
+import { SpreadsheetProvider } from "./context/SpreadsheetContext";
 
 const jobListLoader: LoaderFunction = function () {
   return defer({ jobs: getJobs() });
-};
-
-const jobLoader: LoaderFunction = ({ params }: Record<string, any>) => {
-  return defer({
-    data: getQuestionnaire(params.jobId),
-  });
 };
 
 const router = createBrowserRouter(
@@ -55,13 +51,17 @@ const router = createBrowserRouter(
         }
       >
         <Route index element={<Home />} loader={jobListLoader} />
-        <Route
-          path="questionnaire/:jobId"
-          element={<Jobs />}
-          loader={jobLoader}
-        />
       </Route>
-      <Route path="login" element={<Login />} />"
+      <Route
+        element={
+          <RequireAuth>
+            <FullWidthRoot />
+          </RequireAuth>
+        }
+      >
+        <Route path="jobs/:jobId" element={<Job />} />
+      </Route>
+      <Route path="login" element={<Login />} />
     </Route>,
   ),
 );
@@ -69,8 +69,11 @@ const router = createBrowserRouter(
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <Authenticator.Provider>
-      <Toaster />
-      <RouterProvider router={router} />
+      <SpreadsheetProvider>
+        <Toaster />
+        <RouterProvider router={router} />
+      </SpreadsheetProvider>
     </Authenticator.Provider>
+    
   </React.StrictMode>,
 );

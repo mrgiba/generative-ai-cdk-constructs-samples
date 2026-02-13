@@ -12,6 +12,7 @@
 #
 
 import boto3
+import boto3
 import json
 import logging
 import os
@@ -26,7 +27,10 @@ AWS_REGION = os.environ.get("AWS_REGION")
 RFP_DATE_METADATA_ATTRIBUTE = os.environ.get(
     "RFP_DATE_METADATA_ATTRIBUTE", "lastModified"
 )
-MODEL_ID = os.environ.get("MODEL_ID", "anthropic.claude-3-5-sonnet-20240620-v1:0")
+MODEL_ID = os.environ.get("MODEL_ID", "us.anthropic.claude-sonnet-4-20250514-v1:0")
+
+sts = boto3.client('sts', region_name=AWS_REGION)
+ACCOUNT_ID = sts.get_caller_identity()["Account"]
 
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(
@@ -88,16 +92,19 @@ def handler(event: KBIngestionEvent, context):
 
         input_bucket: str = urlparse(s3_uri).netloc
         input_key: str = urlparse(s3_uri).path.lstrip("/")
+        extension: str = input_key.split(".")[-1]
 
         with tempfile.NamedTemporaryFile(
-            suffix=f".{input_key.split(".")[-1]}"
+            suffix=f".{extension}"
         ) as doc_temp_file:
-            s3.download_fileobj(input_bucket, input_key, doc_temp_file)
+            s3.download_fileobj(input_bucket, input_key, doc_temp_file, ExtraArgs={'ExpectedBucketOwner': ACCOUNT_ID})
+            doc_temp_file.flush()
             doc_temp_file.seek(0)
+            
             logger.info(f"Downloaded s3://{input_bucket}/{input_key}")
 
             file_date = file_metadata.get(RFP_DATE_METADATA_ATTRIBUTE, None)
-            content = file_processor.process_file(doc_temp_file.name, file_date)
+            content = file_processor.process_file(doc_temp_file, extension, file_date)
 
         kb_content = file_processor.as_knowledge_base_chunk(content)
 
@@ -107,6 +114,7 @@ def handler(event: KBIngestionEvent, context):
             Bucket=output_bucket,
             Key=output_key,
             Body=json.dumps({"fileContents": kb_content}),
+            ExpectedBucketOwner=ACCOUNT_ID,
         )
 
         output_file = {

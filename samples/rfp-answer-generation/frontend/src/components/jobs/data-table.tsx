@@ -70,10 +70,10 @@ export function DataTable<TData, TValue>({
         <Input
           placeholder="Search files"
           value={
-            (table.getColumn("filename")?.getFilterValue() as string) ?? ""
+            (table.getColumn("input_s3_uri")?.getFilterValue() as string) ?? ""
           }
           onChange={(event) =>
-            table.getColumn("filename")?.setFilterValue(event.target.value)
+            table.getColumn("input_s3_uri")?.setFilterValue(event.target.value)
           }
           className="max-w-sm"
         />

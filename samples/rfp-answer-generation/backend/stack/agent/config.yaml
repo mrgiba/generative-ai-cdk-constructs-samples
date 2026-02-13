@@ -1,0 +1,22 @@
+config:
+  version: 0.0.1
+  name: RFP Agent Config
+  language: English
+  models:
+    reader: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    answers: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    context: us.anthropic.claude-haiku-4-5-20251001-v1:0
+  knowledge_bases:
+    - id: ${FAQ_KNOWLEDGE_BASE}
+      description: Knowledge Base containing previously answered RFPs. The KB chunks are question-answer pairs.
+      results: 10
+      limit_date_lookback: 5 years
+    - id: ${SUPPORTING_DOC_KNOWLEDGE_BASE}
+      description: Knowledge Base containing supporting documentation. The KB chunks are fixed-length document chunks.
+      results: 5
+      limit_date_lookback: 2 years
+    # you can add additional KBs following this format.
+
+    
+
+      

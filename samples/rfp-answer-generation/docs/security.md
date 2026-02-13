@@ -2,9 +2,92 @@
 
 ## Shared Responsibility Model
 
-Security and Compliance is a shared responsibility between AWS and the customer. This shared model can help relieve the customer’s operational burden as AWS operates, manages and controls the components from the host operating system and virtualization layer down to the physical security of the facilities in which the service operates. The customer assumes responsibility and management of the guest operating system (includ- ing updates and security patches), other associated application software as well as the configura- tion of the AWS provided security group firewall. Customers should carefully consider the services they choose as their responsibilities vary depending on the services used, the integration of those services into their IT environment, and applicable laws and regulations. The nature of this shared responsibility also provides the flexibility and customer control that permits the deployment. As shown in the chart below, this differentiation of responsibility is commonly referred to as Security “of” the Cloud versus Security “in” the Cloud.
+Security and Compliance is a shared responsibility between AWS and the customer.
+
+This shared model can help relieve the customer's operational burden as AWS operates, manages and controls the components from the host operating system and virtualization layer down to the physical security of the facilities in which the service operates.
+ 
+The customer assumes responsibility and management of the guest operating system (including updates and security patches), other associated application software as well as the configuration of the AWS provided security group firewall. Customers should carefully consider the services they choose as their responsibilities vary depending on the services used, the integration of those services into their IT environment, and applicable laws and regulations. The nature of this shared responsibility also provides the flexibility and customer control that permits the deployment. As shown in the chart below, this differentiation of responsibility is commonly referred to as Security "of" the Cloud versus Security "in" the Cloud.
+
+![Shared Responsibility Model](images/shared_responsibility_model_v2.jpg)
 
 For more details, please refer to [AWS Shared Responsibility Model](https://aws.amazon.com/compliance/shared-responsibility-model/).
+
+## Amazon Bedrock
+
+There are three pillars when considering security of LLM applications:
+
+- Security and Privacy of your data;
+- Safety; and
+- Responsibility.
+
+Amazon Bedrock offers a host of features and controls around these three pillars. For an in-depth description please consult the service page.
+
+We do emphasize some general recommendations:
+
+### DoS, Bruteforcing and Noisy-neighbor threats
+
+We recommend you monitor the usage of the service to detect anomalies that might correlate to attack attempts such as Denial-of-service, brute-force attacks or even unintended noisy-neighbor events.
+
+As a suggestion, consider some form of rate limiting to both avoid malicious attacks and also to avoid over-consumption of the service.
+
+### LLM Threats
+
+LLM applications are subject to novel class of security threats, such as those described in the [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/).
+
+The security considerations below are not comprehensive and as you move to production we recommend you dive deeper into both the security model of the Amazon Bedrock platform (see details in [Amazon Bedrock Security](https://docs.aws.amazon.com/bedrock/latest/userguide/security.html)) and security model for LLMs in general, such as those described by OWASP.
+
+### Prompt injection
+
+This manipulates a large language model (LLM) through crafty inputs, causing unintended actions by the LLM. Direct injections overwrite system prompts, while indirect ones manipulate inputs from external sources.
+
+As a recommendation you can apply guardrails to the inputs to LLM.
+
+This sample uses Anthropic Claude models which have been shown by some [benchmarks](https://arxiv.org/abs/2403.02691) to be more robust against this type of attack.
+
+### Jailbreaking
+
+Jailbreaking is the class of attacks that attempt to subvert safety filters built into the LLMs themselves.
+
+There is a subtle difference between Prompt Injection and Jailbreaking. See details [here](https://simonwillison.net/2024/Mar/5/prompt-injection-jailbreaking/).
+
+### Sensitive information disclosure
+
+LLMs may inadvertently reveal confidential data in its responses, leading to unauthorized data access, privacy violations, and security breaches. It is crucial to implement data sanitization and strict user policies to mitigate this.
+
+It should be noted that this sample does not allow users to directly interact with the LLM, however, malicious users may employ subversive attacks, such as purposefuly including text in JIRA tickets to confound the models. Even though we find this highly unlikely, it is important to point out this vulnerability.
+
+### Overreliance
+
+Systems or people overly depending on LLMs without oversight may face misinformation, miscommunication, legal issues, and security vulnerabilities due to incorrect or inappropriate content generated by LLMs.
+
+This risk is inherent to all LLM applications. As a mitigation we suggest that you use this sample as an assistant to a human, in order to increase productivity, but with some overseeing of the content generated.
+
+### Guardrails
+
+Guardrails for Amazon Bedrock provides additional customizable safeguards on top of the native protections of FMs, delivering safety protections that is among the best in the industry by:
+
+For speed, in this sample, we did not use Guardrails for Amazon Bedrock. You should evaluate if this is a necessary safeguard by weighing against your security posture.
+
+### Auditing
+
+Consider enabling model invocation logging and set alerts to ensure adherence to any responsible AI policies.
+
+Model invocation logging is disabled by default. See [Model Invocation Logging](https://docs.aws.amazon.com/bedrock/latest/userguide/model-invocation-logging.html) for details.
+
+
+## IAM Governance
+
+AWS has a series of [best practices and guidelines](https://docs.aws.amazon.com/IAM/latest/UserGuide/IAMBestPracticesAndUseCases.html) around IAM.
+
+### AWS Managed Policies
+
+In this sample, we used the default AWSLambdaBasicExecutionRole AWS Managed Policy to facilitate development. AWS Managed Policies don't grant least privileges in order to cover common use cases. The best practice it to write a custom policy with only the permissions needed by the task. More information at: Use [AWS Defined Policies](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html#bp-use-aws-defined-policies).
+
+### Wildcard Policies
+
+In this sample, some policies use wildcards to specify resources to expedite development. The best practice is to
+create policies that grant least privileges.
+For more information refer to: [Grant Least Privilege](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html#grant-least-privilege)
 
 ## Monitoring
 
@@ -27,7 +110,15 @@ We recommend that you create a trail or a CloudTrail Lake event data store for y
 
 ### Enable CloudWatch alarms
 
-In Amazon Cloudwatch, you can create your own metrics and alarms. While this project does not implement any metrics, we recommend that you go over the [list of recommended Cloudwatch alarms](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Best_Practice_Recommended_Alarms_AWS_Services.html) and set up the metrics that make sense for your own use case.
+In Amazon CloudWatch, you can create your own metrics and alarms. While this project does not implement any metrics, we recommend that you go over the [list of recommended CloudWatch alarms](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Best_Practice_Recommended_Alarms_AWS_Services.html) and set up the metrics that make sense for your own use case.
+
+When using CloudWatch, consider configuring appropriate log retention periods and using IAM policies to control access to logs and metrics. You may want to consider enabling encryption at rest for CloudWatch log groups using AWS KMS. Be mindful that sensitive data should not be logged or should be properly redacted in log entries.
+
+### Enable X-Ray
+
+AWS X-Ray helps developers analyze and debug production applications. X-Ray encrypts traces at rest by default using AWS managed keys.
+
+You should configure sampling rates to balance observability with performance and cost considerations. We recommend controlling access to X-Ray service maps and trace data using IAM policies, and being cautious about including sensitive information in trace annotations and metadata.
 
 ## Encryption Keys
 
@@ -35,78 +126,77 @@ This project uses AWS Managed keys to encrypt resources. While this reduces the 
 
 For more information on how to create an manage your keys, refer to [AWS Key Management Service concepts](https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html).
 
-## API
-
-### API Gateway
-
-In this project, the API has a public facing endpoint protected by AWS WAF. It only allows authorized users from
-Amazon Cognito. You should evaluate if you need to further protect the API endpoint using the following options:
-
-* Restrict access to specific [Source IPs with WAF](https://repost.aws/knowledge-center/waf-allow-my-ip-block-other-ip).
-* Restrict access to a specific VPC as
-  a [private REST API](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-private-apis.html).
-
-### Configure Cross-Origin Resource Sharing (CORS)
-
-CORS is a mechanism that uses additional HTTP headers to tell a browser to let a web application running at one origin (domain) have permission to access selected resources from a server at a different origin.
-
-The API Gateway construct provided with this project (`backend/stack/stack_constructs/apigateway.py`) enables CORS to allow request from the demo web app running locally. If you wish to use the same deployment, you should restrict it to your domain.
-
-### Cognito
-
-You may change password policies and [activate MFA](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-mfa.html) in the Cognito User Pool in the `Cognito` construct found in `backend/stack/stack_constructs/cognito.py`.
-
-If you activate MFA, you may also need to increase your [SNS SMS spending quota](https://docs.aws.amazon.com/sns/latest/dg/channels-sms-awssupport-spend-threshold.html). Once the limit is reached, Cognito's MFA messages will not get delivered, and no one will be able to login.
-
-## IAM Roles & Policies
-
-AWS has a series of [best practices and guidelines](https://docs.aws.amazon.com/IAM/latest/UserGuide/IAMBestPracticesAndUseCases.html)
-around IAM.
-
-### AWS Managed Policies
-
-In this project, we used the default AWSLambdaBasicExecutionRole AWS Managed Policy to facilitate development. AWS
-Managed Policies don’t grant least privileges in order to cover common use cases. The best practice it to write a custom policy with only the permissions needed by the task.
-
-More information: https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html#bp-use-aws-defined-policies.
-
-### Wildcard Policies
-
-In this project, some policies use wildcards to specify resources, specifically for non-standardized Amazon S3 object names.
-
- to expedite development. The best practice is to
-create policies that grant least privileges.
-
-More information: https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html#grant-least-privilege
-
-## S3
+## Amazon S3
 
 Amazon S3 provides a number of security features to consider as you develop and implement your own security policies.
-The following best practices are general guidelines and don’t represent a complete security solution. Because these best practices might not be appropriate or sufficient for your environment, treat them as helpful considerations rather than prescriptions.
+The following best practices are general guidelines and don't represent a complete security solution. Because these best
+practices might not be appropriate or sufficient for your environment, treat them as helpful considerations rather than
+prescriptions.
 
 For an in-depth description of best practices around S3, please refer
 to [Security Best Practices for Amazon S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/security-best-practices.html).
-
-At a minimum we recommend that you:
+At a minimum, we recommend that you:
 
 1. Ensure that your Amazon S3 buckets use the correct policies and are not publicly accessible;
 2. Implement least privilege access;
 3. Consider encryption at-rest (on disk);
 4. Enforce encryption in-transit by restricting access using secure transport (TLS);
-5. Enable object versioning when applicable;
+5. Enable object versioning when applicable; and
 6. Enable cross-region replication as a disaster recovery strategy;
-7. Consider if the data stored in the buckets warrants enabling MFA delete;
-8. Consider enabling Amazon Macie to assist in discovery of potentially sensitive data.
+7. Consider if the data stored in the buckets warrants enabling MFA delete.
 
 ## DynamoDB
 
-In this project, we used DynamoDB to store the record of RFPs processed by AWS Step Functions and their questions. You may want to activate backup strategies for DynamoDB tables. Amazon DynamoDB service can back up the data with per-second granularity and restore it to any single second from the time PITR was enabled up to the prior 35 days. DynamoDB continuous backups represent an additional layer of insurance against accidental loss of data on top of on-demand backups. 
+We implement encryption at rest with AWS KMS Customer Managed Keys. You may want to consider implementing client-side
+encryption to further protect sensitive data.
 
-You can find more details in https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Backups.html.
+For an in-depth description of best practices around DynamoDB, please refer
+to [DynamoDB security best practices](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/best-practices-security.html).
 
-## CDK/CloudFormation
+## Logs
 
-You can prevent stacks from being accidentally deleted by enabling termination protection on the stack. If a user
-attempts to delete a stack with termination protection enabled, the deletion fails and the stack, including its status,
-remains unchanged. For more details on how to enable the deletion protection, refer to [
-`termination_protection` configuration](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib-readme.html#termination-protection).
+Logging can become verbose in prod and too many logs can make analysis difficult. Logging can also disclose data. For
+further AWS-recommended best practices,
+see [Logging best practices](https://docs.aws.amazon.com/prescriptive-guidance/latest/logging-monitoring-for-application-owners/logging-best-practices.html).
+
+### Logging Sensitive Information
+
+This application includes logging for debugging and monitoring. **Exercise caution with log levels to avoid exposing sensitive information** such as customer data, PII, authentication credentials, or business-sensitive RFP content. Use INFO or higher log levels in production, and reserve DEBUG for development environments only. Review log statements to ensure sensitive data is not inadvertently logged.
+
+## Lambda 
+
+### Runtimes
+
+This project uses AWS Lambda provided runtimes.
+
+Lambda's standard deprecation policy is to deprecate a runtime when any major component of the runtime reaches the end of community long-term support (LTS) and security updates are no longer available. Most usually, this is the language runtime, though in some cases, a runtime can be deprecated because the operating system (OS) reaches end of LTS.
+
+After a runtime is deprecated, AWS may no longer apply security patches or updates to that runtime, and functions using that runtime are no longer eligible for technical support. Such deprecated runtimes are provided 'as-is', without any warranties, and may contain bugs, errors, defects, or other vulnerabilities.
+
+You should periodically review and update each AWS Lambda function runtime making sure that it is in the [list of supported runtimes](https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtimes.html#runtimes-supported).
+
+When configuring IAM execution roles for Lambda functions, we recommend following the principle of least privilege. You should also consider encrypting sensitive environment variables using AWS KMS where applicable.
+
+### Security scans
+
+You should periodically run security and vulnerability scans for the code, dependencies and images in your Lambda functions and Lambda layers.
+
+You can use tools like [AWS Inspector](https://docs.aws.amazon.com/inspector/latest/user/scanning_resources_lambda_code.html) or choose your own scanning tool.
+
+For scanning this sample, we used [ASH - The Automated Security Helper](https://github.com/awslabs/automated-security-helper). The security helper tool was created to help you reduce the probability of a security violation in a new code, infrastructure or IAM configuration by providing a fast and easy tool to conduct preliminary security check as early as possible within your development process.
+
+## Dependencies
+
+This sample uses a third-party MCP server (`@negokaz/excel-mcp-server` from npm) for Excel file processing capabilities. This MCP server is MIT licensed and runs isolated within the same runtime as the answering agent without external network connections or additional permissions.
+
+The MIT license is compatible with this Apache 2.0 licensed sample. Since the MCP server operates in an isolated environment within the agent runtime, it does not introduce additional security considerations beyond standard dependency management practices.
+
+## Data Handling
+
+This sample processes RFP documents and company information that may be sensitive. Consider implementing a data classification approach that distinguishes between different sensitivity levels of your data.
+
+When deploying AI systems for business processes like RFP response generation, be aware that LLMs may reflect biases present in their training data. We recommend testing your system with diverse RFP types and formats to identify potential biases, and implementing human oversight for generated responses before submission.
+
+This is a development sample with some acknowledged security shortcuts to facilitate demonstration and development. For instance, Bedrock Guardrails are not implemented, IAM policies use wildcards for convenience, CORS configurations allow localhost origins for local development, and input validation is kept basic for sample purposes.
+
+These limitations are acceptable for demonstration purposes but would require remediation if moving to production use.

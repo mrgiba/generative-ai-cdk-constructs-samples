@@ -16,38 +16,40 @@ import { Link } from "react-router-dom";
 import { ArrowUpDown } from "lucide-react";
 import { Button } from "../ui/button";
 import { Badge } from "@/components/ui/badge";
+import { FileIcon } from "@/lib/fileIcons";
 
 import { Job } from "@/lib/types";
 
 export const columns: ColumnDef<Job>[] = [
   {
-    accessorKey: "filename",
+    accessorKey: "job_id",
     header: ({ column }) => {
       return (
         <Button
           variant="ghost"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
         >
-          File
+          Job ID
           <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
       );
     },
     cell: ({ row }) => {
-      const { filename, job_id } = row.original;
+      const { job_id } = row.original;
+
 
       return (
         <Link
-          to={`/questionnaire/${job_id}`}
+          to={`/jobs/${job_id}`}
           className="flex items-center gap-2"
         >
-          <span className="font-medium text-slate-600">{filename}</span>
+          <span className="font-medium text-slate-600">{job_id}</span>
         </Link>
       );
     },
   },
   {
-    accessorKey: "start_date",
+    accessorKey: "updated_at",
     header: ({ column }) => {
       return (
         <div className="flex justify-center">
@@ -55,14 +57,14 @@ export const columns: ColumnDef<Job>[] = [
             variant="ghost"
             onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
           >
-            Created
+            Updated
             <ArrowUpDown className="ml-2 h-4 w-4" />
           </Button>
         </div>
       );
     },
     cell: ({ row }) => {
-      const rowDate = row.getValue("start_date");
+      const rowDate = row.getValue("updated_at");
       if (rowDate) {
         const date = new Date(rowDate as string);
         return (
@@ -117,7 +119,7 @@ export const columns: ColumnDef<Job>[] = [
     },
   },
   {
-    accessorKey: "approved",
+    accessorKey: "input_s3_uri",
     header: ({ column }) => {
       return (
         <div className="flex justify-center">
@@ -125,17 +127,21 @@ export const columns: ColumnDef<Job>[] = [
             variant="ghost"
             onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
           >
-            Reviewed?
+            Input File
             <ArrowUpDown className="ml-2 h-4 w-4" />
           </Button>
         </div>
       );
     },
     cell: ({ row }) => {
-      const approved = row.getValue<string>("approved");
+      const input_s3_uri = row.getValue<string>("input_s3_uri");
+      const file_name = input_s3_uri.split("/").at(-1) || "";
 
       return (
-        <div className="flex justify-center">{approved ? "Yes" : "No"}</div>
+        <div className="flex items-center justify-center gap-2">
+          <FileIcon filename={file_name} />
+          <span>{file_name}</span>
+        </div>
       );
     },
   },

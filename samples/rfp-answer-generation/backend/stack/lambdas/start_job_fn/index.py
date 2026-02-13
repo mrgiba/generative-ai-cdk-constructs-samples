@@ -12,110 +12,53 @@
 #
 
 import boto3
-import datetime
 import json
+import hashlib
 import logging
 import os
-import re
-
-from decimal import Decimal
-from urllib.parse import unquote_plus
-
-from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 logger.setLevel(os.environ.get("LOG_LEVEL", "WARNING").upper())
 
-dynamodb = boto3.resource("dynamodb")
-jobs_table = dynamodb.Table(os.environ["JOBS_TABLE"])
+AGENT_RUNTIME_ARN = os.environ["AGENT_RUNTIME_ARN"]
 
-state_machine_arn = os.environ["STATE_MACHINE_ARN"]
-step_functions = boto3.client("stepfunctions")
-
-
-class OutputEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, Decimal):
-            return int(obj)
-        if isinstance(obj, datetime.datetime):
-            return obj.isoformat()
-        return json.JSONEncoder.default(self, obj)
-
-
-def start_state_machine_execution(document_s3_path, start_date):
-    logger.info(f"Starting state machine {state_machine_arn}")
-    result = step_functions.start_execution(
-        stateMachineArn=state_machine_arn,
-        input=json.dumps(
-            {
-                "document_s3_path": document_s3_path,
-                "start_date": start_date,
-            }
-        ),
-    )
-    if (
-        "ResponseMetadata" not in result
-        or result["ResponseMetadata"]["HTTPStatusCode"] != 200
-    ):
-        raise AssertionError
-
-    execution_arn = result["executionArn"]
-    job_id = execution_arn.split(":")[-1]
-
-    return execution_arn, job_id
-
-
-def get_execution_status(execution_arn):
-    logger.info(f"Getting status for execution {execution_arn}")
-    result = step_functions.describe_execution(
-        executionArn=execution_arn,
-    )
-
-    if (
-        "ResponseMetadata" not in result
-        or result["ResponseMetadata"]["HTTPStatusCode"] != 200
-    ):
-        raise AssertionError
-
-    status = result["status"]
-
-    return status
-
-
+agent_core_client = boto3.client('bedrock-agentcore')
+  
 def handler(event, _context):
-    logger.debug(event)
+    if 'Records' in event:
+        for record in event['Records']:
+            event_type: str = record['eventName']
+            bucket: str = record['s3']['bucket']['name']
+            object_key: str = record['s3']['object']['key']
 
-    if "Records" in event:
-        for record in event["Records"]:
-            bucket = record["s3"]["bucket"]["name"]
-            object_key = unquote_plus(record["s3"]["object"]["key"])
+            logger.info(f'{event_type}, {bucket}, {object_key}')
 
-            filename = object_key.split("/")[-1]
-            filename = re.sub(r"\.csv$", "", filename)
-            filename = re.sub(r"\.xlsx$", "", filename)
+            s3_uri = f"s3://{bucket}/{object_key}"
 
-            start_date = datetime.datetime.now().isoformat()
-
+            payload = json.dumps({"s3_path": s3_uri}).encode()
+            session_hash = hashlib.sha256(f"{bucket}/{object_key}".encode()).hexdigest()[:8]
+            response = {
+                "message": "",
+                "status": "OK",
+                "session_id": f"{bucket}/{object_key}_{session_hash}"
+            }
+    
             try:
-                execution_arn, job_id = start_state_machine_execution(
-                    f"s3://{bucket}/{object_key}", start_date
+                agent_response = agent_core_client.invoke_agent_runtime(
+                    agentRuntimeArn=AGENT_RUNTIME_ARN,
+                    runtimeSessionId=response['session_id'],
+                    payload=payload
                 )
 
-                jobs_table.put_item(
-                    Item=json.loads(
-                        json.dumps(
-                            {
-                                "job_id": job_id,
-                                "filename": filename,
-                                "start_date": start_date,
-                                "status": get_execution_status(execution_arn),
-                                "approved": False,
-                            }
-                        ),
-                        parse_float=Decimal,
-                    )
-                )
+                # Handle standard JSON response
+                content = []
+                for chunk in agent_response.get("response", []):
+                    content.append(chunk.decode('utf-8'))
 
-                return job_id
-            except ClientError as exception:
-                logger.error(exception, exc_info=True)
+                response['message'] = ''.join(content)
+            except Exception as e:
+                logger.error(e, exc_info=True)
+                response['message'] = "There was an error with your request. Please try again."
+                response['status'] = "ERROR"
+
+            return response
